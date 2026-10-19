@@ -171,7 +171,7 @@ def test_images_dropped_by_default_and_passed_when_configured():
     up2 = FakeUpstream()
     with make(up2, images="pass") as c:
         c.post(AZURE, headers=H, json={"messages": msg})
-        assert "veil_unprotected_images_total 1" in c.get("/metrics").text
+        assert 'veil_unprotected_images_total{tenant="default"} 1' in c.get("/metrics").text
     assert "base64,AAAA" in up2.sent()
 
 

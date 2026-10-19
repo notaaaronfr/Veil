@@ -1,0 +1,53 @@
+# Prometheus alerting rules for Veil (scrape veil:8080/metrics on the internal network).
+groups:
+  - name: veil
+    rules:
+      - alert: VeilDown
+        expr: up{job="veil"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Veil is not answering on {{ $labels.instance }}"
+          runbook: RUNBOOK.md#veil-down
+
+      - alert: VeilLedgerWriteErrors
+        expr: increase(veil_ledger_errors_total[5m]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "Decisions are not being recorded for tenant {{ $labels.tenant }}"
+          runbook: RUNBOOK.md#ledger-write-errors
+
+      - alert: VeilUpstreamCircuitOpen
+        expr: increase(veil_upstream_errors_total[5m]) > 10
+        labels: {severity: warning}
+        annotations:
+          summary: "Upstream {{ $labels.upstream }} is failing ({{ $labels.kind }})"
+          runbook: RUNBOOK.md#upstream-failing
+
+      - alert: VeilDegradedProtection
+        expr: increase(veil_degraded_total[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Protection layer {{ $labels.layer }} skipped for tenant {{ $labels.tenant }} (deterministic layers still applied)"
+          runbook: RUNBOOK.md#degraded-protection
+
+      - alert: VeilRedactionSpike
+        expr: increase(veil_redacted_total[15m]) > 20
+        labels: {severity: warning}
+        annotations:
+          summary: "Unusual number of values had to be redacted (tenant {{ $labels.tenant }})"
+          runbook: RUNBOOK.md#redaction-spike
+
+      - alert: VeilHandoffs
+        expr: increase(veil_handoffs_total[1h]) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "Red-tier requests handed off to a person (tenant {{ $labels.tenant }})"
+
+      - alert: VeilHighLatency
+        expr: histogram_quantile(0.95, sum by (le, tenant) (rate(veil_protect_seconds_bucket[10m]))) > 2
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 protection time above 2s for tenant {{ $labels.tenant }}"
+          runbook: RUNBOOK.md#slow

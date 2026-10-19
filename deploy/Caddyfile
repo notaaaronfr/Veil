@@ -1,0 +1,51 @@
+# TLS termination in front of Veil. Certificates come from your internal CA:
+#   /etc/veil/tls/veil.crt, /etc/veil/tls/veil.key   (server)
+#   /etc/veil/tls/clients-ca.crt                     (optional: require client certificates)
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+	}
+}
+
+:443 {
+	tls /etc/caddy/tls/veil.crt /etc/caddy/tls/veil.key {
+		protocols tls1.2 tls1.3
+		# Mutual TLS: uncomment to require app certificates signed by your internal CA.
+		# client_auth {
+		# 	mode require_and_verify
+		# 	trust_pool file /etc/caddy/tls/clients-ca.crt
+		# }
+	}
+
+	request_body {
+		max_size 4MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	# metrics stay internal: scrape veil:8080/metrics on the internal network
+	@internal path /metrics
+	respond @internal 404
+
+	reverse_proxy veil:8080 {
+		flush_interval -1        # stream tokens as they arrive
+		transport http {
+			read_timeout 180s
+		}
+	}
+
+	log {
+		# access log without query strings or bodies; Veil's audit log is the record of decisions
+		output stdout
+		format filter {
+			request>uri delete
+			request>headers delete
+		}
+	}
+}

@@ -1,0 +1,72 @@
+# Veil multi-tenant configuration. Mounted read-only at /etc/veil/veil.yaml (VEIL_CONFIG).
+# Secrets are referenced by *_file paths (mounted from /etc/veil/secrets), never inlined.
+# Validate before deploying:  docker compose run --rm veil veil-admin config check -c /etc/veil/veil.yaml
+# Reload after editing:        docker compose kill -s HUP veil   (workers restart with the new config)
+
+ledger:
+  dir: /var/lib/veil/ledger                      # one hash-chained ledger per tenant
+  hmac_key_file: /etc/veil/secrets/ledger.key    # 64 hex chars; keep a copy in your secret store
+  fsync: true                                    # every decision durable before the response
+
+# Microsoft Entra ID: apps may send `Authorization: Bearer <Entra token>` instead of a Veil key.
+oidc:
+  issuer: https://login.microsoftonline.com/<directory-id>/v2.0
+  audience: api://veil                           # the Veil app registration's Application ID URI
+  tenant_id: <directory-id>                      # tokens from other directories are rejected
+
+tenants:
+  dubai-holding:
+    branch_key_file: /etc/veil/secrets/dubai-holding.branch.key   # 64 hex chars, per tenant
+    dictionary_file: /etc/veil/dubai-holding.dictionary.json      # known clients/staff (Arabic + Latin)
+    quasi: all                     # or e.g. "AGE,DOB,LOCATION,OCCUPATION" ; "none" to disable
+    images: drop                   # images cannot be inspected: drop (default) | pass
+    default_label: amber           # classification when the app sends no x-veil-classification
+    ceiling: amber                 # highest tier allowed to leave the branch
+    red_types: [HEALTH]            # detected types that force Red for this tenant (optional)
+    # red_upstream: local          # verified in-branch model for Red; absent => hand off to a person
+    handoff_webhook: https://servicedesk.branch.internal/hooks/veil   # receives ids only, never content
+    retention_days: 365            # ledger retention; legal hold blocks deletion
+    upstreams:                     # the ONLY places this tenant's traffic may go
+      azure-uaenorth:
+        provider: azure-openai
+        region: uaenorth
+        url: https://<resource>.openai.azure.com
+        key_file: /etc/veil/secrets/dubai-holding.azure.key
+        auth: api-key
+        deployments: [gpt-4o, text-embedding-3-large]
+
+  branch-two:
+    branch_key_file: /etc/veil/secrets/branch-two.branch.key
+    quasi: all
+    ceiling: amber
+    red_upstream: local
+    upstreams:
+      azure-eu:
+        provider: azure-openai
+        region: swedencentral
+        url: https://<resource-eu>.openai.azure.com
+        key_file: /etc/veil/secrets/branch-two.azure.key
+        deployments: [gpt-4o]
+      local:                       # customer-hosted model inside the branch network
+        provider: customer-hosted
+        url: http://10.20.0.15:8000
+        auth: none
+        in_branch: true            # verified in-branch: may receive Red traffic unmodified
+        deployments: [gpt-4o]
+
+clients:
+  - id: crm-assistant
+    tenant: dubai-holding
+    scopes: [chat]                 # chat | embeddings
+    upstreams: [azure-uaenorth]    # optional subset of the tenant's upstreams
+    rate_limit_rpm: 600            # per worker process; 0 = unlimited
+    keys:                          # from `veil-admin key new`; several keys = rotation
+      - sha256: <64 hex chars>
+        expires: 2027-06-30
+    oidc_subjects: [<Entra application (client) id>]
+
+  - id: branch-two-search
+    tenant: branch-two
+    scopes: [chat, embeddings]
+    keys:
+      - sha256: <64 hex chars>

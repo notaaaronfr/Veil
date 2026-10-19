@@ -9,6 +9,12 @@ Veil is a drop-in proxy for Azure OpenAI and OpenAI. Each request is processed i
 
 Apps change only their endpoint and key.
 
+Veil is multi-tenant:
+- apps authenticate with per-app keys or Microsoft Entra ID tokens;
+- each tenant's traffic can reach only its approved providers, regions and deployments;
+- a Green/Amber/Red gate keeps Red data inside the branch;
+- every decision goes to a tamper-evident, HMAC-certified ledger with retention and legal hold.
+
 ```python
 from openai import AzureOpenAI
 
@@ -20,7 +26,10 @@ client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "conte
 
 | Document | Contents |
 |---|---|
-| [OPERATIONS.md](OPERATIONS.md) | Deploy, configure, operate |
+| [OPERATIONS.md](OPERATIONS.md) | Deploy (Docker on VMs, `deploy/`), configure tenants and clients, operate |
+| [SECURITY.md](SECURITY.md) | Threat model, trust boundaries, key management |
+| [RUNBOOK.md](RUNBOOK.md) | What to do for each alert and incident |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [DESIGN.md](DESIGN.md) | Architecture and the research behind each layer |
 | [RESULTS.md](RESULTS.md) | Benchmarks, including the official RAT-Bench run, with honest limits |
 
@@ -29,7 +38,8 @@ client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "conte
 ```bash
 uv sync --all-extras                 # proxy + NER (+ MLX context guard on Apple Silicon)
 uv run pytest                        # unit, proxy, streaming and never-fail tests
-docker build -t veil .               # CPU image, models baked in, runs offline
+docker build -t veil .               # CPU image from uv.lock, models baked in, runs offline
+bash bench/compose_e2e.sh            # full stack: TLS, two tenants, ledger (needs bench/fake_upstream.py)
 ```
 
 The library can also be used directly:

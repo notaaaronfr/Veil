@@ -63,6 +63,23 @@ _GENERIC = {
 }
 
 
+# Models loaded once per process. Under gunicorn the master preloads them (gunicorn_conf
+# on_starting) so every worker forked from it shares the weights copy-on-write: memory is
+# ~one copy for all workers, and a SIGHUP config reload forks new workers without
+# reloading (or duplicating) the models.
+_SHARED: dict = {}
+
+
+def _shared(key, factory):
+    if key not in _SHARED:
+        _SHARED[key] = factory()
+    return _SHARED[key]
+
+
+def preload(device: str = "cpu", arabic: bool = True) -> None:
+    NERDetector(device=device, arabic=arabic)._load()
+
+
 def _keep_quasi(kind: str, value: str, text: str, end: int) -> bool:
     v = value.strip()
     if text[end : end + 1] == ":" or v.casefold() in _GENERIC or len(v) < 2:
@@ -107,16 +124,17 @@ class NERDetector:
         if self._gliner is None:
             from gliner import GLiNER
 
-            self._gliner = GLiNER.from_pretrained("urchade/gliner_multi_pii-v1").to(self.device)
+            self._gliner = _shared(("gliner", self.device),
+                                   lambda: GLiNER.from_pretrained("urchade/gliner_multi_pii-v1").to(self.device).eval())
         if self.arabic and self._camel is None:
             from transformers import pipeline
 
-            self._camel = pipeline(
+            self._camel = _shared(("camel", self.device), lambda: pipeline(
                 "ner",
                 model="CAMeL-Lab/bert-base-arabic-camelbert-msa-ner",
                 aggregation_strategy="simple",
                 device=self.device,
-            )
+            ))
 
     def detect(self, text: str) -> list[Span]:
         self._load()

@@ -5,32 +5,62 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-      - name: Install (proxy extra; tests don't need the NER models)
-        run: uv sync --extra proxy
+      - name: Install from the lockfile (proxy extra; tests don't need the NER models)
+        run: uv sync --frozen --extra proxy
       - name: Tests
         run: uv run pytest -q
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+      - name: Install the production dependency set from the lockfile
+        run: uv sync --frozen --no-dev --extra proxy --extra ner
+      - name: Known-vulnerability audit of locked dependencies
+        run: uv run --with pip-audit pip-audit --skip-editable --progress-spinner off
 
   image:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
-      - name: Build the CPU image (linux/amd64)
+      - uses: actions/checkout@v7
+      - name: Build the CPU image (linux/amd64) from the lockfile
         run: docker build -t veil:ci .
-      - name: Smoke test (starts offline, /healthz reports NER ready)
+      - name: Smoke test (offline, read-only; master loads models, /readyz ready)
         run: |
           mkdir -p s && python3 -c "import secrets;print(secrets.token_hex(32))" > s/branch.key
-          echo key > s/upstream.key && echo client > s/client.keys
-          docker run -d --name veil -p 8080:8080 --read-only --tmpfs /tmp --network none -v "$PWD/s":/run/secrets:ro \
+          echo key > s/upstream.key && echo client > s/client.keys && chmod 644 s/*
+          docker run -d --name veil --read-only --tmpfs /tmp --network none -v "$PWD/s":/run/secrets:ro \
             -e VEIL_UPSTREAM_URL=http://127.0.0.1:9 -e VEIL_UPSTREAM_KEY_FILE=/run/secrets/upstream.key \
             -e VEIL_BRANCH_KEY_FILE=/run/secrets/branch.key -e VEIL_CLIENT_KEYS_FILE=/run/secrets/client.keys veil:ci
           for i in $(seq 1 60); do docker exec veil python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/healthz').read().decode())" && break; sleep 3; done | tee health.json
           grep -q '"ner":"ready"' health.json
+          docker exec veil python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/readyz').status == 200 else 1)"
+          docker exec veil veil-admin key new | head -1 | grep -q '^key'
+      - name: Vulnerability scan (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: veil:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: veil:ci
+          format: spdx-json
+          artifact-name: veil-sbom.spdx.json

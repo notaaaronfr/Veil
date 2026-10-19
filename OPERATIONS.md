@@ -1,176 +1,228 @@
-# Running Veil in a branch
+# Operating Veil
 
-Veil is an OpenAI / Azure OpenAI compatible proxy. Apps send requests to Veil exactly as they would to Azure OpenAI. Veil pseudonymises each request inside the branch, forwards it to the upstream deployment (Azure OpenAI, UAE North), restores the reply, and wipes the request's keys and mapping.
+Veil is an OpenAI / Azure OpenAI compatible proxy. Each request is processed inside the branch:
 
-## 1. Build or pull the image
+1. Personal data is pseudonymised before the request leaves.
+2. The request goes only to the tenant's approved upstreams.
+3. Every decision is recorded in a tamper-evident ledger.
+4. The reply is restored.
 
-```bash
-docker build -t veil:0.2.0 .                           # native
-docker build --platform linux/amd64 -t veil:0.2.0 .    # for an x86 branch server
-```
+One deployment serves several **tenants** (branches or clients). The deployment target is **Docker on VMs**. See also:
+- [SECURITY.md](SECURITY.md): the threat model;
+- [RUNBOOK.md](RUNBOOK.md): incidents;
+- [RESULTS.md](RESULTS.md): measured protection.
 
-The image is CPU-only. The NER models are baked in, so the container needs **no internet access** at runtime. Egress should be allowed only to the upstream endpoint.
-
-## 2. Secrets and configuration
-
-Generate a branch key once per branch and keep it in your secret store, not in the image:
-
-```bash
-python -c "import secrets; print(secrets.token_hex(32))" > branch.key
-```
-
-| Variable | Required | Meaning |
-|---|---|---|
-| `VEIL_UPSTREAM_URL` | yes | e.g. `https://<resource>.openai.azure.com` |
-| `VEIL_UPSTREAM_KEY_FILE` | yes | file containing the Azure OpenAI key |
-| `VEIL_BRANCH_KEY_FILE` | yes | file containing the 64-hex-character branch key |
-| `VEIL_CLIENT_KEYS_FILE` | yes | one client key per line; apps send one of these as `api-key` or `Authorization: Bearer` |
-| `VEIL_UPSTREAM_AUTH` | no | `api-key` (Azure, the default) or `bearer` |
-| `VEIL_DICTIONARY_FILE` | no | known clients and staff (see below) |
-| `VEIL_NER` | no | `1` (default). If the models fail to load, Veil runs on its deterministic layers and `/healthz` reports `ner: failed` |
-| `VEIL_QUASI` | no | Quasi-identifiers to protect: `all` (default), `none`, or a list chosen from `AGE,DOB,LOCATION,OCCUPATION,ORG,NATIONALITY,ETHNICITY,RELIGION,MARITAL,HEALTH,EDUCATION,CITIZENSHIP,EMPLOYMENT`. Age and birth date are generalised ("50-something", "a date in the 1970s"); the rest become reversible tags |
-| `VEIL_IMAGES` | no | `drop` (default): each image is replaced by a text note, because Veil cannot inspect images. `pass`: images are forwarded, counted and logged |
-| `VEIL_WORKERS` | no | gunicorn workers, default 2. Each loads its own models, at about 2.3 GB RSS |
-| `VEIL_MAX_REQUESTS` | no | requests before a worker is recycled, default 2000, with jitter. Bounds how long any prompt residue lives in memory |
-| `VEIL_TORCH_THREADS` | no | CPU threads per worker, default cores ÷ workers |
-| `VEIL_MLOCK` | no | `1` keeps the process out of swap (`mlockall`). Needs `--cap-add IPC_LOCK` and `--ulimit memlock=-1` |
-| `VEIL_CONTEXT` | no | `0` (default). The local-LLM context guard is not supported on CPU-only servers in this release |
-| `VEIL_CONTEXT_BUDGET` | no | seconds before the context guard is abandoned. The phase-2 output is sent instead |
-| `VEIL_UPSTREAM_TIMEOUT` | no | seconds, default 120 |
-| `VEIL_MAX_BODY_BYTES` | no | default 4 MiB |
-| `VEIL_PORT` | no | default 8080 |
-| `VEIL_LOG_LEVEL` | no | default `INFO` |
-
-Every variable that takes a `_FILE` path also accepts the value directly in the variable without the suffix. Use files in production.
-
-**Dictionary file** (`VEIL_DICTIONARY_FILE`). These are the branch's known people and organisations. They are matched in Arabic and Latin script, at every mention, and by first or last name:
-
-```json
-[
-  {"id": "c-1042", "type": "PERSON", "names": ["Sara Al Mansoori", "سارة المنصوري"]},
-  {"id": "o-17",   "type": "ORG",    "names": ["Emirates Falcon Holdings"]}
-]
-```
-
-## 3. Run
+## 1. Install
 
 ```bash
-docker run -d --name veil -p 8080:8080 \
-  -v /etc/veil:/run/secrets:ro \
-  -e VEIL_UPSTREAM_URL=https://<resource>.openai.azure.com \
-  -e VEIL_UPSTREAM_KEY_FILE=/run/secrets/upstream.key \
-  -e VEIL_BRANCH_KEY_FILE=/run/secrets/branch.key \
-  -e VEIL_CLIENT_KEYS_FILE=/run/secrets/client.keys \
-  -e VEIL_DICTIONARY_FILE=/run/secrets/dictionary.json \
-  --read-only --tmpfs /tmp --memory 6g \
-  veil:0.2.0
+# on the VM (Docker Engine + compose plugin installed)
+sudo mkdir -p /etc/veil/secrets /etc/veil/tls /opt/veil
+sudo cp -r deploy /opt/veil/                          # docker-compose.yml, Caddyfile, unit, firewall
+docker load < veil-0.4.0.tar                          # or pull from your registry
+sudo cp /opt/veil/deploy/veil.example.yaml /etc/veil/veil.yaml   # then edit (section 2)
 ```
 
-The image runs gunicorn with `VEIL_WORKERS` workers. Workers are recycled every `VEIL_MAX_REQUESTS` requests without downtime. Each worker process is hardened at start: it is marked non-dumpable, so other processes cannot read its memory through `/proc/<pid>/mem` or ptrace, and core dumps are disabled. `/healthz` reports what was applied.
+**Secrets.** Each secret is one file in `/etc/veil/secrets/`, mode `0400`, owned by uid `10001`. Generate the keys with:
 
-Add the following settings, which keep request data off disk and out of the host:
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
 
-| Setting | Why |
+You need:
+- `ledger.key`: certifies the ledger. Keep a copy in your secret store; you need it to verify the ledger later.
+- `<tenant>.branch.key`: one per tenant.
+- `<tenant>.<upstream>.key`: the upstream API keys, for example Azure OpenAI.
+
+**TLS.** Issue a server certificate from your internal CA: `/etc/veil/tls/veil.crt` and `veil.key`. Optionally add `clients-ca.crt` for mutual TLS (see the `Caddyfile`).
+
+**Validate, then start.**
+
+```bash
+cd /opt/veil/deploy
+docker compose run --rm veil veil-admin config check -c /etc/veil/veil.yaml
+sudo install -m 0644 veil.service /etc/systemd/system/ && sudo systemctl enable --now veil
+```
+
+**Lock down egress.** Load `deploy/nftables.conf` with your approved upstream addresses. Veil refuses unapproved deployments itself; the firewall enforces the same rule at the network level.
+
+The stack runs three services:
+
+| Service | Role |
 |---|---|
-| `--read-only` | Nothing is written to the container filesystem |
-| `--tmpfs /tmp` | Scratch space lives in memory only |
-| No swap for the container | Pseudonymisation mappings never reach disk |
-| Core dumps disabled | A crash doesn't write process memory to disk |
-| TLS in front of port 8080 (reverse proxy or service mesh) | Traffic between apps and Veil is encrypted |
+| `caddy` | TLS 1.2/1.3 on :443, optional mutual TLS, 4 MB body limit, no query strings in access logs |
+| `veil` | gunicorn: the master loads the models once and workers share them. Read-only filesystem, no capabilities, non-root, non-dumpable, no core dumps, no swap |
+| `maintenance` | Daily ledger verification and retention pruning (legal holds respected) |
 
-## 4. Point apps at Veil
+## 2. Configuration (`/etc/veil/veil.yaml`)
+
+The annotated template is `deploy/veil.example.yaml`.
+
+| Section | Purpose |
+|---|---|
+| `tenants.<id>` | Per tenant: branch key, dictionary, `quasi` and `images` policy, tier labels (`default_label`, `ceiling`, `red_types`, `red_upstream`), handoff webhook, `retention_days`, and **approved `upstreams`** (provider, region, URL, key file, deployments). |
+| `clients[]` | Calling apps: tenant, `scopes` (`chat`, `embeddings`), optional `upstreams` subset, `rate_limit_rpm`, API key **hashes** with expiry, and Entra `oidc_subjects`. |
+| `oidc` | Microsoft Entra ID token validation: `issuer`, `audience`, `tenant_id`. |
+| `ledger` | Directory, HMAC key file, `fsync`. |
+
+**Apply changes** with `systemctl reload veil` (SIGHUP). The master validates the new file first:
+- **if it is invalid** (including half-written), the reload is **rejected** and the previous config keeps serving; look for `config reload REJECTED` in the logs;
+- **if it is valid**, workers restart with it gracefully, without reloading the models.
+
+Process-wide settings are environment variables in `docker-compose.yml`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VEIL_WORKERS` | 2 | gunicorn workers. Models are shared, so extra workers cost little memory |
+| `VEIL_MAX_REQUESTS` | 2000 | Recycle a worker after N requests (with jitter); bounds memory residue |
+| `VEIL_TORCH_THREADS` | cores ÷ workers | CPU threads per worker |
+| `VEIL_MEMORY` | 8g | Container memory limit; swap is disabled for the container |
+| `VEIL_UPSTREAM_TIMEOUT` | 120 | Seconds |
+| `VEIL_UPSTREAM_RETRIES` | 2 | Retries on connection errors, 429 and 502–504 (honours `Retry-After`) |
+| `VEIL_MLOCK` | 0 | `1` locks memory; needs `IPC_LOCK` and a memlock ulimit |
+| `VEIL_LOG_FORMAT` | json | `json` or `text` |
+
+Without `VEIL_CONFIG`, the older single-tenant variables (`VEIL_UPSTREAM_URL`, `VEIL_BRANCH_KEY_FILE` and the rest) still work. They define one tenant called `default`.
+
+## 3. Clients and authentication
+
+**API key.** Run `docker compose run --rm veil veil-admin key new [--expires 2027-06-30]`. It prints the key once, together with the config line, which contains only the key's hash. Add that line under the client's `keys`, then reload. The app sends the key as an `api-key` header or as `Authorization: Bearer veil_…`.
+
+**Rotation.** A client can have several valid keys at once:
+1. Add the new key and reload.
+2. Move the app to the new key.
+3. Remove the old key and reload.
+
+Expired keys are refused automatically.
+
+**Entra ID:**
+1. Register a "Veil" application with an Application ID URI (the `audience`).
+2. Grant each calling app an app role on it.
+3. Put each app's client ID in that client's `oidc_subjects`.
+
+Apps send `Authorization: Bearer <token>`. Veil checks:
+- the signature, against Entra's published keys;
+- issuer, audience and expiry;
+- the directory ID, if `tenant_id` is set.
+
+The VM needs egress to `login.microsoftonline.com` for the signing keys.
+
+**Connecting an app:**
 
 ```python
 from openai import AzureOpenAI
-
-client = AzureOpenAI(
-    azure_endpoint="https://veil.branch.internal",   # was https://<resource>.openai.azure.com
-    api_key="<a Veil client key>",                    # not the Azure key
-    api_version="2024-10-21",
-)
-client.chat.completions.create(model="gpt-4o", messages=[...], stream=True)
+client = AzureOpenAI(azure_endpoint="https://veil.branch.internal", api_key="<Veil key>", api_version="2024-10-21")
+client.chat.completions.create(model="gpt-4o", messages=[...], extra_headers={"x-veil-classification": "amber"})
 ```
 
-Veil supports the following endpoints:
+**Request headers Veil understands:**
 
-| Endpoint | What Veil does |
+| Header | Purpose |
 |---|---|
-| `…/chat/completions` (Azure deployment path, `/v1`, `/openai/v1`) | Protects the request, restores the reply. Streaming works |
-| `…/embeddings` | Protects the input. Nothing to restore |
+| `x-veil-classification` | `green`, `amber` or `red`: the app's Pulse label |
+| `x-request-id` | Correlation ID, echoed back in the response |
+| `x-veil-upstream` | Pick one of several approved upstreams |
 
-Everything else returns **404 and is never forwarded**, because Veil cannot protect what it does not understand.
+**Response headers:** `x-request-id`, and `x-veil-tier` (the effective tier).
 
-## 5. What is protected
+## 4. Tiers (pre-flight policy gate)
 
-Veil processes every text field it forwards:
-- system, user, assistant and tool messages;
-- multi-part text;
-- tool-call and function-call arguments;
-- embedding input.
+The effective tier is the app's label, **raised** (never lowered) by what Veil detects:
+- any sensitive value makes it at least Amber;
+- any of the tenant's `red_types` makes it Red.
 
-**Within one request**, each person gets one tag, consistent across all messages. **Across requests**, nothing is linkable, because each request uses fresh keys.
+| Effective tier | What happens |
+|---|---|
+| Up to the tenant's `ceiling` | Pseudonymised and forwarded to the approved upstream |
+| Above the ceiling, with a `red_upstream` set (an upstream marked `in_branch: true`) | The **original** request goes to that in-branch model. It never leaves the branch |
+| Above the ceiling, with no in-branch model | **Handed off to a person.** The app gets `403 red_tier_handoff` with a `handoff_id`. The webhook receives the IDs and reason, never content. The ledger records it |
 
-| Layer | Default | What it covers |
-|---|---|---|
-| Canonicalisation | on | Zero-width characters, Arabic-Indic and fullwidth digits, homoglyphs, spelled-out digits |
-| Patterns with checksums | on | Emirates ID, IBAN, cards, phone numbers, email, SSN, national IDs, account numbers |
-| Branch dictionary | if configured | Known people and organisations |
-| NER | on | Unknown names and organisations (English, multilingual and Arabic), addresses |
-| Egress hard line | always | Every known value, at every occurrence, in the final payload |
-| Quasi-identifiers (NER + patterns) | on (`VEIL_QUASI=all`) | Age and birth date (generalised); city or state, occupation, employer, nationality, ethnicity, religion, marital status, health, education, citizenship and employment (tagged) |
-| Context guard (local LLM) | off on CPU | Deeper rewriting of context clues. Apple Silicon only in this release |
+Classification is risk reduction, not a guarantee. It depends on detection, which has measured miss rates.
 
-The **never-fail policy** works as follows:
-- A request is never refused for privacy reasons.
-- If NER fails, Veil continues with its deterministic layers.
-- If the egress check finds a value it cannot turn into a surrogate, that value is replaced by `[REDACTED]`.
-- A known value is never sent.
-- If the deterministic layers themselves fail, the request returns `500` and nothing is sent.
+## 5. Ledger, retention and legal hold
+
+Each tenant has its own hash-chained ledger at `/var/lib/veil/ledger/<tenant>/`, with one file per day. Every record is certified with HMAC-SHA256 using `ledger.key`.
+
+A record holds **approved fields only**:
+- request ID, client, authentication method;
+- route, deployment, upstream, provider, region;
+- tier label and effective tier, decision, reason;
+- counts by entity type, scrubbed and redacted counts, degraded layers, image counts;
+- upstream status, timings.
+
+It never holds prompt text or values.
+
+```bash
+docker compose exec veil veil-admin ledger verify -c /etc/veil/veil.yaml          # all tenants
+docker compose exec veil veil-admin hold set -c /etc/veil/veil.yaml -t <tenant> --reason "<case>" --actor "<who>"
+docker compose exec veil veil-admin hold status -c /etc/veil/veil.yaml -t <tenant>
+docker compose exec veil veil-admin hold release -c /etc/veil/veil.yaml -t <tenant> --actor "<who>"
+```
+
+**Retention.** The `maintenance` service prunes whole day files older than `retention_days`. **A tenant under legal hold is never pruned.** Pruning and holds are themselves recorded in the chain, and an anchor keeps the chain verifiable after pruning.
+
+**What Veil stores.** Veil stores no prompts, drafts or replies. Retention of intermediate drafts belongs to the calling application.
+
+**Backups.** Back up the `veil-ledger` volume like any audit store. Verify restored copies with `ledger verify`, using the same `ledger.key`.
+
+## 6. What is protected
+
+| Layer | What it covers |
+|---|---|
+| Canonicalisation | Zero-width characters, Arabic-Indic and fullwidth digits, homoglyphs, spelled-out digits |
+| Patterns with checksums | Emirates ID, IBAN, card, phone, email, SSN, national IDs, account numbers; deterministic age and date-of-birth patterns |
+| Branch dictionary | Known people and organisations, in Arabic and Latin script |
+| NER (GLiNER + CAMeLBERT) | Unknown names, organisations and addresses; quasi-identifiers per tenant `quasi` setting. Age and birth date are generalised; place, occupation, employer, nationality, ethnicity, religion, marital status, health, education, citizenship and employment are tagged |
+| Egress hard line | Every known value, at every occurrence, in the final payload. Anything that can't be swapped for a surrogate is replaced with `[REDACTED]`, and the request is never refused |
+| Allowlist | Only the tenant's approved upstreams and deployments |
+
+**Never refused for privacy reasons.** If NER fails, Veil continues on its deterministic layers; `/readyz` stays ready but reports `degraded`. If the deterministic layers themselves fail, the request returns `500` and nothing is sent.
 
 **Not protected:**
-- **Images, when `VEIL_IMAGES=pass`.** They are forwarded, counted in `veil_unprotected_images_total` and logged. With the default `drop` they never leave.
-- **The `name` field on messages.**
-- **Clues that are not entities.** Sex conveyed by pronouns, and attributes implied only by context ("since the divorce" is caught; "my ex" may not be). See RESULTS.md for measured residual risk.
+- Images when `images: pass` (counted and logged).
+- The `name` field on messages.
+- Clues that are not values, such as sex conveyed by pronouns or "since the divorce". On CPU-only servers these are handled only by the local-LLM layer, which is disabled. See RESULTS.md.
 
-## 6. Observability
+## 7. Monitoring
 
-| Endpoint or logger | What it gives you |
+| Endpoint | Meaning |
 |---|---|
-| `GET /healthz` | Status, and whether NER and the context guard are `ready`, `failed` or `disabled` |
-| `GET /metrics` | Prometheus text format: requests by outcome, entities detected by type, scrubbed, redacted, degraded layers, restored, hallucinated tags, unprotected images |
-| Audit log (`veil.audit`) | One JSON line per request: request ID, path, protection timing, detected counts by type, scrubbed, redacted, degraded, upstream status and timing, restored count |
+| `/livez` | Process is up |
+| `/readyz` | Ready to serve. Returns 503 if the ledger cannot be written, so traffic stops rather than going unrecorded |
+| `/healthz` | Tenants, upstreams, model state, hardening applied, circuit-breaker states |
+| `/metrics` | Prometheus format (internal network only; Caddy hides it) |
 
-**Logs and metrics never contain values.** Tests enforce this.
+Metrics include:
+- requests by tenant and outcome;
+- entities detected by type;
+- scrubbed, redacted, degraded and handoff counts;
+- rate-limited requests;
+- upstream errors and retries;
+- ledger errors;
+- protect and upstream latency histograms.
 
-## 7. Performance (CPU, 4 threads, `bench/latency.py`)
+Alert rules are in `deploy/prometheus-alerts.yml`. Each alert links to a section of RUNBOOK.md.
 
-Single request, NER without quasi-identifiers:
+**Logs** are JSON on stdout, rotated by Docker. The `veil.audit` logger mirrors each ledger record. Neither logs nor metrics contain values; tests enforce this.
 
-| Message size | Protect time, p50 | Protect time, p95 |
-|---|---|---|
-| 93 chars | 69 ms | 118 ms |
-| 930 chars | 137 ms | 310 ms |
-| 2,800 chars | 589 ms | 798 ms |
+## 8. Capacity
 
-These were measured on an Apple M5 CPU; re-measure on the branch server. Quasi-identifier detection adds GLiNER labels and costs roughly 20–25% throughput. Memory is about 2.3 GB per worker, so allow 6 GB for the default 2 workers.
+Measured on a 4-vCPU container with production defaults, 12 concurrent requests, over TLS:
+- **Throughput:** about 4.3 requests/s.
+- **Latency:** p50 2.7 s, p95 3.1 s.
+- **Memory:** 2.4 GB for 2 workers, because the models are shared.
 
-Under load (`bench/load.py`: container with 4 vCPUs, 12 concurrent requests, production defaults):
+On a single request, protection takes 0.1–0.8 s, depending on length.
 
-| Workers | Throughput | p50 | p95 |
-|---|---|---|---|
-| 1 | 4.5 req/s | 2.6 s | 2.9 s |
-| 2 (default) | 3.9 req/s | 2.9 s | 3.8 s |
+Throughput scales with cores. For more capacity, run several VMs behind a load balancer; Veil is stateless apart from the ledger.
 
-The default is 2 workers even though 1 is slightly faster. With a single worker, each recycle pauses service for about 20 s while the models reload. To scale, add cores or replicas: Veil is stateless, so any load balancer works. Without NER the protect step takes under 1 ms. The whole conversation is protected on every request, so long chats pay for their full history each turn.
+> **Rate limits are per worker process.** With N workers, a client can get up to N × `rate_limit_rpm`.
 
-## 8. Known limits in this release
+## 9. Limits of this release
 
-- **Memory residue.** CPython cannot guarantee that every copy of a value is wiped. Veil makes residue unreadable rather than promising erasure:
+- **Memory residue.** CPython cannot guarantee that every copy of a value is wiped from memory. Veil makes residue unreadable rather than promising erasure:
   - non-dumpable workers;
   - no core dumps;
-  - optional `mlockall`;
+  - no swap;
   - worker recycling.
-
-  Disable swap on the host, or use `VEIL_MLOCK=1`.
-- **The same unknown person in Arabic and Latin script gets two different tags.** Dictionary entries are linked across scripts.
-- **The context guard needs Apple MLX.** A Linux CPU or GPU runtime (llama.cpp) is not yet integrated.
+- **Cross-script names.** The same unknown person written in Arabic and in Latin script gets two tags. Branch-dictionary entries are linked across scripts.
+- **Context guard.** The local-LLM layer runs on Apple Silicon only. A Linux GPU runtime is not yet integrated.

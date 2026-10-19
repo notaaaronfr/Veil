@@ -1,0 +1,19 @@
+# systemd unit: run the Veil compose stack at boot.
+#   install -m 0644 veil.service /etc/systemd/system/ && systemctl enable --now veil
+[Unit]
+Description=Veil pseudonymisation proxy
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/veil/deploy
+ExecStart=/usr/bin/docker compose up -d --wait
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose kill -s HUP veil
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
