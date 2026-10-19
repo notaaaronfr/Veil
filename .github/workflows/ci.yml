@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install (proxy extra; tests don't need the NER models)
+        run: uv sync --extra proxy
+      - name: Tests
+        run: uv run pytest -q
+
+  image:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the CPU image (linux/amd64)
+        run: docker build -t veil:ci .
+      - name: Smoke test (starts offline, /healthz reports NER ready)
+        run: |
+          mkdir -p s && python3 -c "import secrets;print(secrets.token_hex(32))" > s/branch.key
+          echo key > s/upstream.key && echo client > s/client.keys
+          docker run -d --name veil -p 8080:8080 --read-only --tmpfs /tmp --network none -v "$PWD/s":/run/secrets:ro \
+            -e VEIL_UPSTREAM_URL=http://127.0.0.1:9 -e VEIL_UPSTREAM_KEY_FILE=/run/secrets/upstream.key \
+            -e VEIL_BRANCH_KEY_FILE=/run/secrets/branch.key -e VEIL_CLIENT_KEYS_FILE=/run/secrets/client.keys veil:ci
+          for i in $(seq 1 60); do docker exec veil python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8080/healthz').read().decode())" && break; sleep 3; done | tee health.json
+          grep -q '"ner":"ready"' health.json

@@ -1,6 +1,6 @@
-from sandwich import BranchDictionary, Entity, Sandwich
-from sandwich.canonical import canonicalise
-from sandwich.fpe import iban_valid, luhn_valid
+from veil import BranchDictionary, Entity, Sandwich
+from veil.canonical import canonicalise
+from veil.fpe import iban_valid, luhn_valid
 
 DICT = BranchDictionary(
     [
@@ -131,7 +131,7 @@ class FakeNER:
     def detect(self, text):
         import re
 
-        from sandwich.detect import Span
+        from veil.detect import Span
 
         return [
             Span(m.start(), m.end(), "PERSON", m.group())
@@ -150,7 +150,7 @@ def test_ner_names_keep_one_identity_across_turns():
 def test_word_matching_a_tag_name_does_not_block():
     class WordNER:  # mimics GLiNER tagging the bare word "email"
         def detect(self, text):
-            from sandwich.detect import Span
+            from veil.detect import Span
 
             i = text.index("email")
             return [Span(i, i + 5, "EMAIL", "email")]

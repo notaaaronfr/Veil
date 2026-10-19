@@ -14,8 +14,8 @@ Only the outbound text is scored. Restoration happens after the attacker would s
 so it does not affect the score.
 """
 
-from sandwich import Sandwich
-from sandwich.ner import NERDetector
+from veil import Sandwich
+from veil.ner import NERDetector
 
 try:  # base class location per the RAT-Bench README
     from pii_benchmark.anonymizers.anonymizer import Anonymizer

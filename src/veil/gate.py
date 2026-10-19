@@ -34,7 +34,7 @@ def _squash(s: str) -> str:
     return re.sub(r"[^0-9A-Za-z]", "", s).upper()
 
 
-_TAG = re.compile(r"\[[A-Z]+(?:_[A-Z]+)*_\d+(?:_(?:FIRST|LAST))?\]")
+_TAG = re.compile(r"\[[A-Z]+(?:_[A-Z]+)*_\d+(?:_(?:FIRST|LAST))?\]|\[REDACTED\]")
 
 
 def find_leaks(text: str, vault: SessionVault, dictionaries: list[BranchDictionary] = ()) -> list[Hit]:

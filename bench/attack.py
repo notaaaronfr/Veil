@@ -24,7 +24,7 @@ from datasets import load_dataset
 
 from ratbench import OUT, load_outputs, select
 from run import fmt
-from sandwich.llm import LocalLLM
+from veil.llm import LocalLLM
 
 ATTACKER = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
 

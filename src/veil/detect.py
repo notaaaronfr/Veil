@@ -80,9 +80,31 @@ def _classify_digits(raw: str, before: str = "") -> str | None:
     return None
 
 
+_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+_DATE = (
+    rf"(?:\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{_MONTH},?\s+\d{{4}}"
+    rf"|{_MONTH}\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}"
+    r"|\d{1,2}[/.\-]\d{1,2}[/.\-](?:19|20)?\d{2}|(?:19|20)\d{2}-\d{2}-\d{2}|(?:19|20)\d{2})"
+)
+_DOB = re.compile(rf"\b(?:born|birth\w*|dob|d\.o\.b\.?)\b[^.\n\d]{{0,25}}?({_DATE})", re.I)
+_TENS = r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?"
+_AGE = re.compile(
+    rf"\b(?:(\d{{1,3}}|{_TENS})[- ]years?[- ]old|aged?\s+(\d{{1,3}}|{_TENS}))\b", re.I
+)
+
+
 class PatternDetector:
+    def __init__(self, quasi: set[str] | frozenset = frozenset()):
+        self.quasi = set(quasi)  # "DOB" / "AGE" enable the deterministic quasi patterns
+
     def detect(self, text: str) -> list[Span]:
         spans: list[Span] = []
+        if "DOB" in self.quasi:
+            for m in _DOB.finditer(text):
+                spans.append(Span(m.start(1), m.end(1), "DOB", m.group(1)))
+        if "AGE" in self.quasi:
+            for m in _AGE.finditer(text):
+                spans.append(Span(m.start(), m.end(), "AGE", m.group()))
         for m in _EMAIL.finditer(text):
             spans.append(Span(m.start(), m.end(), "EMAIL", m.group()))
         for m in _IBAN.finditer(text):

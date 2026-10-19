@@ -1,109 +1,104 @@
-# Results (17 Oct 2026)
+# Results (19 Oct 2026)
 
-All data is synthetic or public. Reproduce with `bench/run.py` and `bench/ratbench.py`. Outputs are saved under `bench/out/`.
+All data is synthetic or public. Outputs are reproducible with `bench/`; they are git-ignored under `bench/out/`.
 
-## RAT-Bench: direct identifiers
+> **Correction (19 Oct).** Earlier versions of this file were affected by a bug. The egress check blocked about 10% of phase 2 outputs (29/300 English records), because the bare word "email" matched inside our own `[EMAIL_n]` tags. Blocked records counted as "no leak" and as BLEU ≈ 0. The bug is fixed, all affected outputs were regenerated with 0 blocked, and the numbers below are the corrected ones. Rows not yet re-run are marked *pre-fix*.
 
-Share of records in which any direct identifier (name, ID, card, phone, address, email) is still recoverable from the outbound text. Lower is better. Brackets are Wilson 95% intervals; n = 100 per cell.
+## 1. Official RAT-Bench score (headline)
 
-| System | EN easy | EN hard | Dutch | Serbian |
-|---|---|---|---|---|
-| No protection | 100% | 79% | 100% | 100% |
-| Presidio (default) | 18% [12–27] | 50% [40–60] | 46% [37–56] | 26% [18–35] |
-| GLiNER multi-PII alone | 34% [26–44] | 51% [41–61] | 41% [32–51] | 39% [30–49] |
-| Ours, phase 1 (patterns + dictionary) | 40% | 73% | — | — |
-| **Ours, phase 2 (+ NER)** | **8% [4–15]** | **20% [13–29]** | **11% [6–19]** | **7% [3–14]** |
+This uses the official pipeline from `github.com/imperial-aisp/rat-bench`:
+- the authors' Staab-style attack prompt and parser;
+- CorrectMatch re-identification risk on the authors' weighted US census sample;
+- a record counts as re-identified if any direct identifier is guessed or the correctness is ≥ 0.2.
 
-Utility, measured as BLEU of the outbound text against the original (higher is better):
+The attacker is **Claude Sonnet 5.5**. The paper used GPT-4.1, so absolute numbers are not directly comparable with the paper's table. The sample is the first 40 *hard* and first 40 *implicit* English records, and every system is attacked on the same records. All 330 attacker calls completed with no refusals, at a cost of $10.87.
 
-| System | EN easy | EN hard | EN implicit | Dutch | Serbian |
-|---|---|---|---|---|---|
-| Presidio | 89 | 91 | 92 | 59 | 35 |
-| GLiNER alone | 87 | 86 | 88 | 85 | 89 |
-| **Ours, phase 2** | 87 | 80 | 96 | 71 | 87 |
-
-**What still leaks (phase 2):**
-- Paraphrased addresses, such as "been at 195 for ages" or "off East Morgan Avenue".
-- Card numbers split across sentences.
-- Spelled-out emails.
-
-These are the cases phase 3 (local LLM) targets.
-
-**Caveats, read before quoting:**
-- **The leak metric is a proxy.** An independent checker looks for gold values in the output; it does not run RAT-Bench's official GPT-4.1 attacker. The official score also covers *indirect* identifiers, which this table does not. `bench/ratbench_official.py` is ready to run once an API key is available.
-- **The Hugging Face "spanish" config contains the English records** (100/100 identical). Spanish was therefore not tested. Dutch and Serbian are genuine.
-- **Some formats were added after seeing the data.** The patterns for Belgian RRN, Serbian JMBG and Serbian phone formats were added after inspecting those configs. They are real national formats, but this favours us slightly on Dutch and Serbian.
-- **Azure AI Language PII** (the strongest commercial tool in the RAT-Bench paper) is not yet compared. `bench/ratbench.py --systems azure` runs once credentials are set.
-
-## Phase 3: context guard (local Qwen3-4B)
-
-Measured on RAT-Bench English: the first 40 *hard* and first 40 *implicit* records (80 total).
-
-**Direct identifiers (proxy leak).** Share of hard records still leaking:
-
-| System | Hard records leaking | BLEU (hard) | BLEU (implicit) |
+| Re-identification rate ↓ | Hard (n=40) | Implicit (n=40) | Pooled (n=80) |
 |---|---|---|---|
-| No protection | 75% [60–86] | 100 | 100 |
-| Presidio | 45% [31–60] | 91 | 92 |
-| GLiNER alone | 55% [40–69] | 86 | 88 |
-| Ours, phase 2 | 15% [7–29] | 78 | 97 |
-| **Ours, phase 3** | **5% [1–17]** | 70 | 83 |
+| No protection | 100% | 32.5% [20–47] | 53/80 |
+| Presidio (the authors' configuration) | 80% [68–93] | 27.5% [15–42] | 43/80 |
+| Ours, phase 2 (patterns + dictionary + NER) | 90% [80–97] | 27.5% [15–42] | 47/80 |
+| Ours, phase 2 + CPU quasi-identifiers (`VEIL_QUASI=all`, the production default) | 75% | 27.5% | 41/80 |
+| **Ours, phase 3 (+ local context guard)** | **65% [50–80]** | **12.5% [3–25]** | **31/80** |
 
-**Indirect identifiers.** The attack is a Staab-style guessing game run by a local Llama-3.1-8B attacker, a different model family from the guard. Scores are top-3 guesses checked against RAT-Bench gold attributes, 351 attributes in total.
-
-| System | Inferred | Occupation | State | Marital | Education | Sex | Birth year |
-|---|---|---|---|---|---|---|---|
-| No protection | 57.5% [52–63] | 31/42 | 36/37 | 42/50 | 22/40 | 37/42 | 17/51 |
-| Presidio | 50.7% [46–56] | 31/42 | 26/37 | 42/50 | 20/40 | 38/42 | 11/51 |
-| Ours, phase 2 | 51.9% [47–57] | 28/42 | 33/37 | 38/50 | 19/40 | 34/42 | 15/51 |
-| **Ours, phase 3** | **44.7% [40–50]** | **20/42** | 25/37 | 35/50 | 16/40 | 34/42 | 15/51 |
-
-Paired exact McNemar tests on the same attributes:
-- Phase 3 vs Presidio: p = 0.015
+Paired exact McNemar tests on the same records:
+- Phase 3 vs Presidio: p = 0.023
 - Phase 3 vs phase 2: p < 0.001
+- Phase 2 vs Presidio: p = 0.42, no significant difference
+- Phase 2 + CPU quasi vs Presidio: p = 0.65, no significant difference (41 vs 44 of 80)
+- Phase 3 vs phase 2 + CPU quasi: p = 0.031
 
-**Frontier attacker: GPT-4.1, the attacker used in the RAT-Bench paper.** Run via OpenRouter on synthetic data only, same 80 records and 351 attributes:
+The second attack run on the same saved guesses gave Presidio 82.5% instead of 80% on the hard level. CorrectMatch refits its model each run, so the score varies slightly between runs.
 
-| System | Inferred | Occupation | State | Marital | Education | Sex | Birth year |
-|---|---|---|---|---|---|---|---|
-| No protection | 76.9% [72–81] | 40/42 | 37/37 | 50/50 | 23/40 | 42/42 | 37/51 |
-| Presidio | 73.2% [68–78] | 40/42 | 33/37 | 50/50 | 25/40 | 42/42 | 29/51 |
-| Ours, phase 2 | 67.8% [63–73] | 38/42 | 34/37 | 41/50 | 19/40 | 35/42 | 33/51 |
-| **Ours, phase 3** | **64.4% [59–69]** | 35/42 | 31/37 | 41/50 | 22/40 | 36/42 | 29/51 |
+**How to read this:**
+- **Phase 2 leaks fewer direct identifiers than Presidio** (hard: 17 vs 25 records with a correctly guessed direct identifier). Presidio blanks every date and location, and the risk score counts birth date and state. Phase 2 keeps those for utility, so it does not beat Presidio on this score. Closing that gap is phase 3's job.
+- **CPU quasi-identifier protection** (shipped in the proxy) closes the gap to Presidio and edges past it on hard records (75% vs 82.5%), at equal utility. It does nothing for *implicit* records, whose clues are not taggable values ("since the divorce", "up north"). Only the LLM rewrite catches those.
+- **Phase 3 is the only system that significantly beats Presidio.** It has 6 direct-identifier hits on hard records, and implicit-level risk falls from 27.5% to 12.5%.
+- **The pipeline reproduces the paper.** On these subsets, our reproduction gives no protection 100% / 32.5% and Presidio 80–82.5% / 27.5%. The paper reports 98% / 32% and 77% / 30%.
+- **The paper's other numbers are a rough reference only, since its attacker differs:**
+  - Azure AI Language PII: 33% hard, 21% implicit.
+  - Best LLM anonymiser (iterative GPT-4.1): 18% / 18%.
+- **Limits:** n = 40 per level, a single attacker run, and English only.
 
-Paired exact McNemar tests under GPT-4.1:
-- Phase 3 vs Presidio: p = 0.0002
-- Phase 2 vs Presidio: p = 0.016
-- Phase 3 vs phase 2: p = 0.036
+**Local patches to the RAT-Bench clone** (run outside this repo):
+- the census-file path;
+- credentials read from environment variables;
+- a usage and stop-reason log in the Claude attacker;
+- a slim runner that skips anonymisers that don't install on macOS;
+- a CorrectMatch encoding fix. The current CorrectMatch.jl treats raw census codes as already encoded 1..K. Values are re-encoded to 1..K the same way CorrectMatch's categorical path does, and this was checked equal to the original path wherever that path works.
 
-Presidio barely improves on no protection (73% vs 77%). A frontier model infers almost everything that Presidio leaves in the context.
+## 2. Direct identifiers, RAT-Bench (proxy leak, all systems)
 
-GPT-6.1-sol was also tried and discarded as an attacker. It refused 10–19 records per system and answered "unknown" far more often, which matches the GPT-5-class refusals reported in the RAT-Bench paper. Its numbers are therefore not a valid upper bound. The cached guesses are in `bench/out/`.
+This is a quick, attacker-free proxy. An independent checker looks for gold direct identifiers in the outbound text. Lower leak is better; higher BLEU means more of the text is preserved.
 
-**Reading this honestly:**
-- **Phase 3 is the only system that significantly reduces inference, but the effect is moderate.**
-- **Sex is barely affected.** Pronouns and relationship words still give it away.
-- **Marital status and state still leak heavily.** This matches the literature: no published method solves combination leakage.
-- **The utility cost is about 20 BLEU points on hard records.**
-- **Latency is about 35 s per message** on an M5 laptop with a 4B model, measured interactively. The batch timing was distorted by the machine sleeping.
-- **Absolute leakage is high for every system.** Under GPT-4.1, phase 3 still lets 64% of attributes be inferred. The gains over Presidio are significant but leave most of the inference problem unsolved.
-- **n = 80 records.** Rerun on the full set before quoting.
+| System | EN easy | EN hard | BLEU easy / hard / implicit |
+|---|---|---|---|
+| No protection | 100% | 79% | 100 / 100 / 100 |
+| Presidio (default) | 18% | 50% | 89 / 91 / 92 |
+| GLiNER alone | 34% | 51% | 87 / 86 / 88 |
+| **Ours, phase 2** | **8%** | **28%** | **96 / 97 / 99** |
 
-## UAE synthetic benchmark (`bench/run.py`)
+On the 40-record hard subset:
 
-The test set has 900 samples across 9 evasion families: zero-width characters, Arabic-Indic digits, fullwidth digits, spaced digits, dotted digits, homoglyphs, upper case, spelled-out digits, and none. It mixes Arabic and English, using clients the branch knows and names it does not.
+| System | Leak | BLEU |
+|---|---|---|
+| Presidio | 45% | 91 |
+| Ours, phase 2 | 25% | 97 |
+| **Ours, phase 3** | **5%** | 88 |
 
-| System | Leaking samples |
-|---|---|
-| Presidio | 44–100%, depending on evasion family |
-| **Ours, phase 2** | **0 / 900** (upper bound ≤ 4.6% per family; ≤ 26% per small unknown-name bucket) |
+**Dutch and Serbian, phase 2** (*pre-fix*, with 2 Dutch records blocked):
 
-Restoration under 4 manglings of the model output: 900/900 each.
+| System | Dutch | Serbian | BLEU (Dutch / Serbian) |
+|---|---|---|---|
+| Presidio | 46% | 26% | 59 / 35 |
+| Ours, phase 2 | 11% | 7% | 71 / 87 |
 
-This is our own test set, so it plays to our strengths. Treat RAT-Bench as the fairer comparison.
+The patterns for Belgian RRN, Serbian JMBG and Serbian phone numbers were added after inspecting those configs. The Hugging Face "spanish" config is a copy of the English records, so Spanish was not tested.
+
+## 3. Earlier attacker studies (*pre-fix*, superseded by §1)
+
+These were run on outputs from before the blocking fix, on the same 80 records:
+
+| Study | No protection | Presidio | Phase 2 | Phase 3 | Phase 3 vs Presidio |
+|---|---|---|---|---|---|
+| Local Llama-3.1-8B attacker, attributes inferred | 57.5% | 50.7% | 51.9% | 44.7% | p = 0.015 |
+| GPT-4.1 attacker via OpenRouter | 76.9% | 73.2% | 67.8% | 64.4% | p = 0.0002 |
+
+GPT-6.1-sol was discarded as an attacker because it refused too often.
+
+## 4. UAE synthetic benchmark (`bench/run.py`)
+
+The test set has 900 samples across 9 evasion families, mixing Arabic and English, with clients the branch knows and names it does not. Results:
+- Presidio leaks 44–100%, depending on the evasion family.
+- **Ours, phase 2 leaks 0/900.**
+- Restoration is 100% under 4 model-output manglings.
+
+This is our own test set, so it plays to our strengths.
 
 ## Known limits
 
-- **Cross-script names are not linked.** The same unknown person written in Arabic and Latin script gets two different tags. Branch-dictionary clients are linked.
-- **Indirect identifiers are not handled yet.** Age, job, city and family are phase 3.
-- **The vault is written in Python.** Memory cannot be guaranteed wiped; this moves to Rust in phase 4.
+- **Indirect identifiers.** Even phase 3 leaves 65% of hard records re-identifiable under a frontier attacker. No published method solves combination leakage.
+- **Phase 3 latency.** It takes roughly 35 s per message on an M5 laptop with a 4B model. A NER trigger (≤ 0.1 s) skips it for messages that contain no personal attributes.
+- **Cross-script links.** The same unknown person in Arabic and Latin script gets two tags. Branch-dictionary clients are linked.
+- **Vault.** It is written in Python, so wiping memory cannot be guaranteed. It moves to Rust in phase 4.
+- **Azure PII.** A head-to-head with Azure AI Language PII on the same attacker still needs Azure credentials.

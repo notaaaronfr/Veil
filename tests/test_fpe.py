@@ -1,6 +1,6 @@
 import pytest
 
-from sandwich.fpe import FF1, iban_check_digits, iban_valid, luhn_valid
+from veil.fpe import FF1, iban_check_digits, iban_valid, luhn_valid
 
 KEY = bytes.fromhex("2B7E151628AED2A6ABF7158809CF4F3C")
 

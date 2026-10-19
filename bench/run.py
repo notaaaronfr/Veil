@@ -21,9 +21,9 @@ import re
 import unicodedata
 from collections import defaultdict
 
-from sandwich import BranchDictionary, Entity, Sandwich
-from sandwich.canonical import canonicalise
-from sandwich.fpe import iban_check_digits, luhn_check_digit
+from veil import BranchDictionary, Entity, Sandwich
+from veil.canonical import canonicalise
+from veil.fpe import iban_check_digits, luhn_check_digit
 
 FIRST = [("Sara", "سارة"), ("Mohammed", "محمد"), ("Fatima", "فاطمة"), ("Khalid", "خالد"),
          ("Aisha", "عائشة"), ("Omar", "عمر"), ("Mariam", "مريم"), ("Rashid", "راشد"),
@@ -169,7 +169,7 @@ def main():
         presidio = sys_presidio()
     ner = None
     if args.system == "ours-p2":
-        from sandwich.ner import NERDetector
+        from veil.ner import NERDetector
 
         ner = NERDetector(device=args.device)
     sw = Sandwich(dictionary=dictionary, ner=ner)

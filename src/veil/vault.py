@@ -29,7 +29,7 @@ class Entry:
 class SessionVault:
     def __init__(self, branch_key: bytes, session_id: str):
         okm = HKDF(
-            algorithm=hashes.SHA256(), length=64, salt=session_id.encode(), info=b"sandwich/v1"
+            algorithm=hashes.SHA256(), length=64, salt=session_id.encode(), info=b"veil/v1"
         ).derive(branch_key)
         self._keys = bytearray(okm)
         self._aead = AESGCM(bytes(self._keys[:32]))
@@ -80,7 +80,7 @@ class SessionVault:
 
     def items(self):
         """Every (entry, original spelling) pair — the egress check must see all spellings."""
-        for s, e in self.entries.items():
+        for s, e in list(self.entries.items()):  # snapshot: a timed-out context thread may still add
             for v in self.reveal_all(s):
                 yield e, v
 

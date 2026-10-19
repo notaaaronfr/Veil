@@ -1,7 +1,7 @@
 [project]
-name = "sandwich"
-version = "0.1.0"
-description = "Add your description here"
+name = "veil"
+version = "0.2.0"
+description = "Verified pseudonymisation proxy for LLM calls"
 readme = "README.md"
 authors = [
     { name = "notaaaronfr", email = "charlesaarondavid@gmail.com" }
@@ -9,16 +9,29 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=50.0.2",
+]
+
+[project.optional-dependencies]
+proxy = [
+    "fastapi>=0.120",
+    "uvicorn>=0.38",
+    "httpx>=0.28",
+    "gunicorn>=23.0",
+    "uvicorn-worker>=0.3",
+]
+ner = [
     "gliner>=0.2.29",
-    "mlx-lm>=0.32.2",
-    "presidio-analyzer>=2.2.364",
-    "presidio-anonymizer>=2.2.362",
-    "protobuf>=7.36.2",
-    "sentencepiece>=0.2.2",
-    "tiktoken>=0.14.0",
     "torch>=2.14.1",
     "transformers>=5.16.1",
+    "sentencepiece>=0.2.2",
+    "tiktoken>=0.14.0",
+    "protobuf>=7.36.2",
 ]
+# local LLM for the context guard; MLX is Apple Silicon only
+context = ["mlx-lm>=0.32.2"]
+
+[project.scripts]
+veil-proxy = "veil.proxy:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
@@ -29,4 +42,7 @@ dev = [
     "datasets>=5.1.0",
     "pytest>=9.1.1",
     "sacrebleu>=2.6.0",
+    "presidio-analyzer>=2.2.364",
+    "presidio-anonymizer>=2.2.362",
+    "openai>=3.35.1",
 ]

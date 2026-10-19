@@ -40,6 +40,11 @@ def _merge(path: Path, fresh: list[dict], ours: dict[str, list[str]]) -> None:
 
 
 def main():
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", nargs="*", help="inject only these methods into the subset (keeps other guesses)")
+    only = ap.parse_args().only
     data = list(load_dataset("imperial-cpg/rat-bench", "english")["train"])
     p2 = saved("ratbench_english_ours-p2.jsonl")
     assert len(p2) == len(data) == 300
@@ -55,20 +60,26 @@ def main():
 
     full = Path("benchmark_full")
     full.mkdir(exist_ok=True)
-    for lvl, recs in by_level.items():
-        _merge(full / f"level_{lvl}.jsonl", recs, {"sandwich_p2": p2_level[lvl]})
+    if not only:
+        for lvl, recs in by_level.items():
+            _merge(full / f"level_{lvl}.jsonl", recs, {"sandwich_p2": p2_level[lvl]})
 
     # phase-3 subset: saved in subset order = first 40 hard, then first 40 implicit
     p3 = saved("ratbench_english_ours-p3_sub.jsonl")
     assert len(p3) == 80
+    extra = {}
+    p2q_path = OURS / "ratbench_english_ours-p2q_sub.jsonl"
+    if p2q_path.exists():
+        extra["sandwich_p2q"] = saved(p2q_path.name)
+        assert len(extra["sandwich_p2q"]) == 80
     sub = Path("benchmark_sub")
     sub.mkdir(exist_ok=True)
     for j, lvl in enumerate((2, 3)):
-        _merge(
-            sub / f"level_{lvl}.jsonl",
-            by_level[lvl][:40],
-            {"sandwich_p2": p2_level[lvl][:40], "sandwich_p3": p3[40 * j : 40 * (j + 1)]},
-        )
+        methods = {"sandwich_p2": p2_level[lvl][:40], "sandwich_p3": p3[40 * j : 40 * (j + 1)]}
+        methods |= {m: v[40 * j : 40 * (j + 1)] for m, v in extra.items()}
+        if only:
+            methods = {m: v for m, v in methods.items() if m in only}
+        _merge(sub / f"level_{lvl}.jsonl", by_level[lvl][:40], methods)
     blocked = sum(t == "<BLOCKED>" for t in p2) + sum(t == "<BLOCKED>" for t in p3)
     print("written:", {lvl: len(v) for lvl, v in by_level.items()}, "+ subset 40/40; blocked outputs:", blocked)
 

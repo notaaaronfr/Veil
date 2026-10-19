@@ -27,6 +27,53 @@ _QUASI_LABELS = [
     "age", "date of birth", "occupation", "employer", "nationality", "ethnicity", "religion",
     "marital status", "medical condition", "education", "city", "country", "family member",
 ]
+
+# Quasi-identifiers: attributes that re-identify in combination (RAT-Bench / CorrectMatch
+# score DOB, state, occupation, marital status, race, citizenship, education, employment).
+# GLiNER label -> Veil type. AGE and DOB are generalised; the rest become reversible tags.
+QUASI_LABELS = {
+    "age": "AGE",
+    "date of birth": "DOB",
+    "city": "LOCATION",
+    "state": "LOCATION",
+    "occupation": "OCCUPATION",
+    "employer": "ORG",
+    "nationality": "NATIONALITY",
+    "ethnicity": "ETHNICITY",
+    "religion": "RELIGION",
+    "marital status": "MARITAL",
+    "medical condition": "HEALTH",
+    "education": "EDUCATION",
+    "citizenship status": "CITIZENSHIP",
+    "employment status": "EMPLOYMENT",
+}
+QUASI_TYPES = sorted(set(QUASI_LABELS.values()))
+_NUMBER_WORDS = r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|teen|ten|eleven|twelve"
+# GLiNER over-tags generic words; these types need a value word to count
+_LEXICON = {
+    "MARITAL": r"divorc|widow|married|marriage|single|separated|engaged|husband|wife|spouse|fianc",
+    "EDUCATION": r"high school|college|university|bachelor|master|phd|doctorate|diploma|\bged\b|degree|graduat",
+    "EMPLOYMENT": r"unemploy|retired|employed|laid off|self-employ|full-time|part-time|student|between jobs|out of work",
+    "CITIZENSHIP": r"citizen|naturali|green card|visa|residen|born in",
+}
+_PROPER_ONLY = {"LOCATION", "ORG", "NATIONALITY", "ETHNICITY", "RELIGION"}
+_GENERIC = {
+    "work", "job", "jobs", "other", "career", "role", "position", "employee", "worker", "boss", "supervisor",
+    "company", "city", "state", "states", "country", "town", "school", "faith", "church", "health", "pain",
+}
+
+
+def _keep_quasi(kind: str, value: str, text: str, end: int) -> bool:
+    v = value.strip()
+    if text[end : end + 1] == ":" or v.casefold() in _GENERIC or len(v) < 2:
+        return False  # "Target:" / "Doctor:" are speaker labels, not attributes
+    if kind == "AGE":
+        return bool(re.search(rf"\d|{_NUMBER_WORDS}", v, re.I))
+    if kind in _LEXICON:
+        return bool(re.search(_LEXICON[kind], v, re.I))
+    if kind in _PROPER_ONLY:
+        return bool(re.search(r"(?:^|\s)[A-Z؀-ۿ]", v))
+    return True
 _ARABIC = re.compile(r"[؀-ۿ]")
 _EMAIL_LIKE = re.compile(r"@|\bat\b|\bdot\b|\.(com|net|org|ae)\b", re.I)
 
@@ -44,10 +91,15 @@ def _chunks(text: str, size: int = 1200):
 
 
 class NERDetector:
-    def __init__(self, threshold: float = 0.5, device: str = "cpu", arabic: bool = True):
+    def __init__(
+        self, threshold: float = 0.5, device: str = "cpu", arabic: bool = True, quasi: set[str] | None = None
+    ):
+        """`quasi`: Veil types to detect as quasi-identifiers (see QUASI_TYPES); None = off."""
         self.threshold = threshold
         self.device = device
         self.arabic = arabic
+        self.quasi = set(quasi or ())
+        self._labels = list(_GLINER_LABELS) + [l for l, t in QUASI_LABELS.items() if t in self.quasi]
         self._gliner = None
         self._camel = None
 
@@ -70,9 +122,16 @@ class NERDetector:
         self._load()
         spans: list[Span] = []
         for off, chunk in _chunks(text):
-            for e in self._gliner.predict_entities(chunk, list(_GLINER_LABELS), threshold=self.threshold):
+            # one model pass covers direct identifiers and the enabled quasi-identifiers
+            for e in self._gliner.predict_entities(chunk, self._labels, threshold=self.threshold):
                 s, t = off + e["start"], off + e["end"]
-                kind, value = _GLINER_LABELS[e["label"]], text[s:t]
+                value = text[s:t]
+                if e["label"] in QUASI_LABELS:
+                    kind = QUASI_LABELS[e["label"]]
+                    if _keep_quasi(kind, value, text, t):
+                        spans.append(Span(s, t, kind, value))
+                    continue
+                kind = _GLINER_LABELS[e["label"]]
                 if kind == "EMAIL" and not _EMAIL_LIKE.search(value):
                     continue  # GLiNER also tags the bare word "email"
                 if kind in ("PHONE", "SSN", "CARD") and not re.search(r"\d|zero|one|two|three|four|five|six|seven|eight|nine", value, re.I):

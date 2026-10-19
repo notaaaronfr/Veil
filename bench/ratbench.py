@@ -122,10 +122,10 @@ def sys_gliner(ner):
 TASK = "summarise this conversation and answer questions about what was discussed"
 
 
-def sys_ours(ner=None, context=None):
-    from sandwich import Sandwich
+def sys_ours(ner=None, context=None, quasi=frozenset()):
+    from veil import Sandwich
 
-    sw = Sandwich(ner=ner, context=context)
+    sw = Sandwich(ner=ner, context=context, quasi=quasi)
 
     def run(t):
         s = sw.session()
@@ -136,8 +136,15 @@ def sys_ours(ner=None, context=None):
     return run
 
 
+def _p2q(device):
+    """Phase 2 + CPU quasi-identifier protection (no local LLM)."""
+    from veil.ner import QUASI_TYPES, NERDetector
+
+    return sys_ours(NERDetector(device=device, quasi=set(QUASI_TYPES)), quasi=set(QUASI_TYPES))
+
+
 def _context():
-    from sandwich.context import ContextGuard
+    from veil.context import ContextGuard
 
     return ContextGuard()
 
@@ -187,7 +194,7 @@ def main():
     args = ap.parse_args()
     OUT.mkdir(exist_ok=True)
 
-    from sandwich.ner import NERDetector
+    from veil.ner import NERDetector
 
     ner = NERDetector(device=args.device)  # loads lazily, so --rescore stays fast
     factories = {
@@ -198,6 +205,7 @@ def main():
         "ours-p1": lambda: sys_ours(None),
         "ours-p2": lambda: sys_ours(ner),
         "ours-p3": lambda: sys_ours(ner, _context()),
+        "ours-p2q": lambda: _p2q(args.device),
     }
     bleu = BLEU(effective_order=True)
 

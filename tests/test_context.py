@@ -1,5 +1,5 @@
-from sandwich import Sandwich
-from sandwich.context import ContextGuard, _recovers
+from veil import Sandwich
+from veil.context import ContextGuard, _recovers
 
 
 class ScriptedLLM:

@@ -16,6 +16,42 @@ from .fpe import FF1, iban_check_digits, luhn_check_digit
 from .vault import SessionVault
 
 FPE_TYPES = {"EMIRATES_ID", "CARD", "PHONE", "IBAN", "ACCOUNT", "SSN", "NATIONAL_ID"}
+# Generalised, not tagged: the coarse value keeps the task working (DR-SL 2026: generalising
+# keeps ~2x the utility of placeholders at equal leakage). Not restored.
+GENERALISE_TYPES = {"AGE", "DOB"}
+
+_WORD_NUM = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen".split())}
+_WORD_NUM |= {w: 10 * i for i, w in enumerate("_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()) if w != "_"}
+
+
+def _parse_number(text: str) -> int | None:
+    m = re.search(r"\d{1,3}", text)
+    if m:
+        return int(m.group())
+    words = re.findall(r"[a-z]+", text.lower())
+    nums = [_WORD_NUM[w] for w in words if w in _WORD_NUM]
+    return sum(nums) if nums else None
+
+
+def generalise(type_: str, value: str) -> str:
+    if type_ == "AGE":
+        n = _parse_number(value)
+        if n is None or not 0 < n < 120:
+            return "an adult"
+        band = "under 10" if n < 10 else "teenage" if n < 20 else f"{n // 10 * 10}-something"
+        # keep the surrounding words: "52-year-old" -> "50-something-year-old", "aged 52" -> "aged 50-something"
+        units = "one|two|three|four|five|six|seven|eight|nine"
+        m = re.search(rf"\d{{1,3}}|(?:{'|'.join(sorted(_WORD_NUM, key=len, reverse=True))})(?:[- ](?:{units}))?", value, re.I)
+        return value[: m.start()] + band + value[m.end():] if m and n >= 20 else band
+    if type_ == "DOB":
+        y = re.search(r"(19|20)\d{2}", value)
+        if not y:
+            return "a date"
+        decade = int(y.group()) // 10 * 10
+        return f"the {decade}s" if value.strip() == y.group() else f"a date in the {decade}s"
+    return value
 
 
 def norm_key(span: Span) -> str:
@@ -39,6 +75,7 @@ class Transformer:
         self._counters: dict[str, int] = {}
         self._entity_index: dict[tuple[str, str], int] = {}
         self._originals: set[str] = set()
+        self.generalised = 0
 
     def _next(self, type_: str) -> int:
         self._counters[type_] = self._counters.get(type_, 0) + 1
@@ -90,6 +127,9 @@ class Transformer:
         return _render(span.value, new)
 
     def surrogate_for(self, span: Span) -> str:
+        if span.type in GENERALISE_TYPES:
+            self.generalised += 1
+            return generalise(span.type, span.value)
         key = norm_key(span)
         existing = self.vault.lookup_surrogate(span.type, key)
         if existing:
