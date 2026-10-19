@@ -18,7 +18,7 @@ proxy = [
     "httpx>=0.28",
     "gunicorn>=23.0",
     "uvicorn-worker>=0.3",
-    "pyjwt[crypto]>=2.10",
+    "pyjwt[crypto]>=2.15.1",
     "pyyaml>=6.0.3",
 ]
 ner = [

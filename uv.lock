@@ -3066,7 +3066,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'proxy'", specifier = ">=0.28" },
     { name = "mlx-lm", marker = "extra == 'context'", specifier = ">=0.32.2" },
     { name = "protobuf", marker = "extra == 'ner'", specifier = ">=7.36.2" },
-    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'proxy'", specifier = ">=2.10" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'proxy'", specifier = ">=2.15.1" },
     { name = "pyyaml", marker = "extra == 'proxy'", specifier = ">=6.0.3" },
     { name = "sentencepiece", marker = "extra == 'ner'", specifier = ">=0.2.2" },
     { name = "tiktoken", marker = "extra == 'ner'", specifier = ">=0.14.0" },
