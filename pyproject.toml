@@ -13,7 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 proxy = [
-    "fastapi>=0.120",
+    "fastapi>=0.161.1",
     "uvicorn>=0.38",
     "httpx>=0.28",
     "gunicorn>=23.0",
