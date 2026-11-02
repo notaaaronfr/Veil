@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -792,7 +792,7 @@ http = [
 
 [[package]]
 name = "gliner"
-version = "0.2.29"
+version = "0.2.30"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -805,9 +805,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/93/02/ab43b9ad919d3cc1bcbb35485b2cdf7508ede0cddcebf72e765711795c30/gliner-0.2.29.tar.gz", hash = "sha256:39fa8f33c027627e1d6724bff972ab197bf37cea27e401cd3d40f2f95909b0a4", size = 299687, upload-time = "2026-09-08T12:50:50.113Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/3a/8b035ee9be6351a565690376851d01293c1327f0b6c00a537c9646a54585/gliner-0.2.30.tar.gz", hash = "sha256:836374222a1e27ae044b3fd07e12f52cb327e1a268de092371a4190a90ee6bf5", size = 372006, upload-time = "2026-10-31T16:30:04.239Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/76/74ec5493e2167350c53a51c0f1db8e6a096c1b99f7110e2d9fc7daaf5cdc/gliner-0.2.29-py3-none-any.whl", hash = "sha256:0c8cfb9f5c2daf7aff329ebb5ab1609052d7ad0aca0ef26049b9476b018b3fde", size = 261988, upload-time = "2026-09-08T12:50:48.514Z" },
+    { url = "https://files.pythonhosted.org/packages/15/ea/6e5cfe1eda660db6e9418db102193fd044f32308522ada59998ded7a1a3a/gliner-0.2.30-py3-none-any.whl", hash = "sha256:ab5d43a8f1c69e76ed296ee6ad5e4c438060ef1c4484fd9c26b21598fbae4865", size = 307783, upload-time = "2026-10-31T16:30:02.637Z" },
 ]
 
 [[package]]
@@ -2909,7 +2909,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.16.1"
+version = "5.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -2922,9 +2922,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/2e/ba418680ab901dae269360bb8642485eae04f1af91ee2ebb8bd6f3607305/transformers-5.16.1.tar.gz", hash = "sha256:17b0eac726ddc55e84ac58946063e0c6d37fd000c456b581f050ea0f4e822869", size = 9650542, upload-time = "2026-08-26T14:48:58.789Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/a0/ff6bb1ac6f340ac6131e07c6763b7c29de8f192ae1c85f1992b0f634fff5/transformers-5.22.0.tar.gz", hash = "sha256:f2864f282383820089b21d104d55cb72118b8594f053c2cbeb58d0740f9ff662", size = 10381714, upload-time = "2026-10-29T14:18:18.404Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/4d/ee3728674c0bbc637bb4af88ccf0be697f92e4e90b55f5dc110c44d61b61/transformers-5.16.1-py3-none-any.whl", hash = "sha256:2f2d5b98a5ad3718713653734298fa620754ed683702a635ebb587df3ed29c7e", size = 12080592, upload-time = "2026-08-26T14:48:55.083Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/21/f9d73a82d7d7d47fccab5acb2236f67b033106df2f2d193a01e9f229968f/transformers-5.22.0-py3-none-any.whl", hash = "sha256:3cca65f94b0aa33511433c7c1a661c513e4ad8bc0504cb370d181d771e7c9aa0", size = 13051755, upload-time = "2026-10-29T14:18:15.031Z" },
 ]
 
 [[package]]
@@ -3072,7 +3072,7 @@ requires-dist = [
     { name = "tiktoken", marker = "extra == 'ner'", specifier = ">=0.14.0" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'ner'", specifier = ">=2.14.1", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "sys_platform != 'linux' and extra == 'ner'", specifier = ">=2.14.1" },
-    { name = "transformers", marker = "extra == 'ner'", specifier = ">=5.16.1" },
+    { name = "transformers", marker = "extra == 'ner'", specifier = ">=5.22.0" },
     { name = "uvicorn", marker = "extra == 'proxy'", specifier = ">=0.38" },
     { name = "uvicorn-worker", marker = "extra == 'proxy'", specifier = ">=0.3" },
 ]
